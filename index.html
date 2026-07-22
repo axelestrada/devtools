@@ -1,0 +1,1263 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DevTools</title>
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- React & ReactDOM -->
+    <script
+      crossorigin
+      src="https://unpkg.com/react@18/umd/react.production.min.js"
+    ></script>
+    <script
+      crossorigin
+      src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"
+    ></script>
+
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Google Fonts: Inter & Fira Code -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "sans-serif"],
+              mono: ['"Fira Code"', "monospace"],
+            },
+            colors: {
+              heroui: {
+                50: "#F4F4F5",
+                100: "#E4E4E7",
+                200: "#D4D4D8",
+                300: "#A1A1AA",
+                500: "#006FEE",
+                600: "#005BC4",
+                900: "#18181B",
+              },
+              moonlight: {
+                bg: "#191b28",
+                editor: "#1e2030",
+                active: "#282a3a",
+                line: "#3b4261",
+                key: "#89ddff",
+                string: "#c3e88d",
+                number: "#ff9e64",
+                boolean: "#ff757f",
+                null: "#f7768e",
+                bracket: "#82aaff",
+                embedded: "#7dcfff",
+                badge: "#bb9af7",
+              },
+            },
+            boxShadow: {
+              heroui: "0 10px 30px -10px rgba(0, 0, 0, 0.05)",
+              "heroui-lg": "0 20px 40px -15px rgba(0, 111, 238, 0.12)",
+              moonlight: "0 8px 32px 0 rgba(0, 0, 0, 0.37)",
+            },
+          },
+        },
+      };
+    </script>
+
+    <style>
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: #fff;
+        color: #101010;
+      }
+
+      .fira-code {
+        font-family: "Fira Code", monospace;
+        font-variant-ligatures: contextual;
+      }
+
+      /* Standard scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(161, 161, 170, 0.3);
+        border-radius: 9999px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: rgba(161, 161, 170, 0.5);
+      }
+
+      /* Moonlight Scrollbars */
+      .moonlight-scroll::-webkit-scrollbar-thumb {
+        background: rgba(130, 170, 255, 0.2);
+      }
+      .moonlight-scroll::-webkit-scrollbar-thumb:hover {
+        background: rgba(130, 170, 255, 0.4);
+      }
+
+      .hero-glass {
+        background: rgba(255, 255, 255, 0.85);
+        backdrop-filter: blur(12px);
+      }
+
+      /* Subtle grid pattern background */
+      .bg-grid-pattern {
+        background-image: radial-gradient(
+          rgba(0, 0, 0, 0.06) 1px,
+          transparent 1px
+        );
+        background-size: 24px 24px;
+      }
+    </style>
+  </head>
+  <body class="h-screen w-screen overflow-hidden bg-grid-pattern antialiased">
+    <div id="root" class="h-full w-full"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+      // --- JSON PARSER & EXTRACTOR CORE ---
+      function extractFirstJson(text) {
+        if (!text || typeof text !== "string") return null;
+
+        let startIdx = -1;
+        let firstChar = "";
+
+        for (let i = 0; i < text.length; i++) {
+          const char = text[i];
+          if (char === "{" || char === "[") {
+            startIdx = i;
+            firstChar = char;
+            break;
+          }
+        }
+
+        if (startIdx === -1) return null;
+
+        const stack = [firstChar];
+        let inString = false;
+        let isEscaped = false;
+
+        for (let i = startIdx + 1; i < text.length; i++) {
+          const char = text[i];
+
+          if (inString) {
+            if (isEscaped) {
+              isEscaped = false;
+            } else if (char === "\\") {
+              isEscaped = true;
+            } else if (char === '"') {
+              inString = false;
+            }
+            continue;
+          }
+
+          if (char === '"') {
+            inString = true;
+            continue;
+          }
+
+          if (char === "{" || char === "[") {
+            stack.push(char);
+          } else if (char === "}") {
+            if (stack[stack.length - 1] === "{") {
+              stack.pop();
+            } else {
+              return null;
+            }
+          } else if (char === "]") {
+            if (stack[stack.length - 1] === "[") {
+              stack.pop();
+            } else {
+              return null;
+            }
+          }
+
+          if (stack.length === 0) {
+            return text.substring(startIdx, i + 1);
+          }
+        }
+
+        return null;
+      }
+
+      function parseErrorPosition(errorMsg, text) {
+        const match =
+          errorMsg.match(/at position (\d+)/i) ||
+          errorMsg.match(/column (\d+)/i);
+        if (match && match[1]) {
+          const pos = parseInt(match[1], 10);
+          const lines = text.substring(0, pos).split("\n");
+          return {
+            line: lines.length,
+            column: lines[lines.length - 1].length + 1,
+            message: errorMsg,
+          };
+        }
+
+        const lineMatch = errorMsg.match(/line (\d+) column (\d+)/i);
+        if (lineMatch) {
+          return {
+            line: parseInt(lineMatch[1], 10),
+            column: parseInt(lineMatch[2], 10),
+            message: errorMsg,
+          };
+        }
+
+        return { line: 1, column: 1, message: errorMsg };
+      }
+
+      // --- UTILS FOR BONUS HIGHLIGHTS ---
+      const IS_URL = /^(https?:\/\/[^\s]+)$/i;
+      const IS_ISO_DATE =
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?$/;
+      const IS_UUID =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const IS_BASE64 =
+        /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+
+      function isPotentiallyNestedJson(val) {
+        if (typeof val !== "string") return false;
+        const trimmed = val.trim();
+        return (
+          (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+          (trimmed.startsWith("[") && trimmed.endsWith("]"))
+        );
+      }
+
+      // --- TREE VIRTUALIZATION & FLATTENING ---
+      function flattenTree(
+        data,
+        collapsedPaths,
+        path = "",
+        depth = 0,
+        keyName = null,
+        isLast = true,
+      ) {
+        const rows = [];
+        const type = Array.isArray(data)
+          ? "array"
+          : data === null
+            ? "null"
+            : typeof data;
+
+        if (type === "object" || type === "array") {
+          const isCollapsed = collapsedPaths.has(path);
+          const keys = Object.keys(data);
+          const childCount = keys.length;
+
+          rows.push({
+            path,
+            depth,
+            keyName,
+            type,
+            isExpandable: childCount > 0,
+            isCollapsed,
+            childCount,
+            isLast,
+          });
+
+          if (!isCollapsed && childCount > 0) {
+            keys.forEach((k, idx) => {
+              const childIsLast = idx === keys.length - 1;
+              const childPath = path ? `${path}.${k}` : k;
+              const childRows = flattenTree(
+                data[k],
+                collapsedPaths,
+                childPath,
+                depth + 1,
+                k,
+                childIsLast,
+              );
+              rows.push(...childRows);
+            });
+
+            rows.push({
+              path: `${path}__end`,
+              depth,
+              type: type === "array" ? "array_end" : "object_end",
+              isExpandable: false,
+              isLast,
+            });
+          }
+        } else {
+          rows.push({
+            path,
+            depth,
+            keyName,
+            type,
+            value: data,
+            isExpandable: false,
+            isLast,
+          });
+        }
+
+        return rows;
+      }
+
+      // --- COMPONENT: TREE ROW ---
+      const TreeRow = React.memo(
+        ({
+          row,
+          onToggle,
+          searchQuery,
+          activeMatchIndex,
+          currentMatchIndex,
+          onCopyText,
+        }) => {
+          const [embeddedParsed, setEmbeddedParsed] = useState(null);
+          const [showEmbedded, setShowEmbedded] = useState(false);
+
+          const indentStyle = { paddingLeft: `${row.depth * 20 + 8}px` };
+
+          // Helper to highlight search matching
+          const highlightText = (text, isKey = false) => {
+            if (!searchQuery) return text;
+            const textStr = String(text);
+            const parts = textStr.split(
+              new RegExp(
+                `(${searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})`,
+                "gi",
+              ),
+            );
+            return parts.map((part, i) => {
+              if (part.toLowerCase() === searchQuery.toLowerCase()) {
+                return (
+                  <mark
+                    key={i}
+                    class="bg-amber-400 text-slate-950 font-bold px-0.5 rounded-sm"
+                  >
+                    {part}
+                  </mark>
+                );
+              }
+              return part;
+            });
+          };
+
+          // Check nested string JSON
+          useEffect(() => {
+            if (row.type === "string" && isPotentiallyNestedJson(row.value)) {
+              const extracted = extractFirstJson(row.value);
+              if (extracted) {
+                try {
+                  setEmbeddedParsed(JSON.parse(extracted));
+                } catch (e) {
+                  setEmbeddedParsed(null);
+                }
+              }
+            }
+          }, [row.value, row.type]);
+
+          const renderValue = () => {
+            if (row.type === "string") {
+              const val = row.value;
+              const isUrl = IS_URL.test(val);
+              const isIso = IS_ISO_DATE.test(val);
+              const isUuid = IS_UUID.test(val);
+              const isBase64 = val.length > 20 && IS_BASE64.test(val);
+
+              return (
+                <span class="inline-flex items-center gap-1.5 flex-wrap">
+                  <span class="text-moonlight-string font-medium">
+                    "{highlightText(val)}"
+                  </span>
+
+                  {isUrl && (
+                    <a
+                      href={val}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="text-xs bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 px-1.5 py-0.5 rounded-full inline-flex items-center gap-1 transition-all"
+                    >
+                      <i data-lucide="external-link" class="w-3 h-3"></i> Link
+                    </a>
+                  )}
+
+                  {isIso && (
+                    <span class="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded-full font-mono">
+                      ISO Date
+                    </span>
+                  )}
+
+                  {isUuid && (
+                    <span class="text-[10px] bg-teal-500/20 text-teal-300 border border-teal-500/30 px-1.5 py-0.2 rounded-full font-mono">
+                      UUID
+                    </span>
+                  )}
+
+                  {isBase64 && (
+                    <button
+                      onClick={() => onCopyText(val)}
+                      class="text-[10px] bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 px-1.5 py-0.2 rounded-full transition-all active:scale-95"
+                    >
+                      Copy Base64
+                    </button>
+                  )}
+
+                  {embeddedParsed && (
+                    <button
+                      onClick={() => setShowEmbedded(!showEmbedded)}
+                      class="text-[10px] bg-moonlight-embedded/20 text-moonlight-embedded border border-moonlight-embedded/40 px-2 py-0.5 rounded-full hover:bg-moonlight-embedded/30 transition-all font-semibold active:scale-95"
+                    >
+                      {showEmbedded
+                        ? "Hide Inner JSON"
+                        : "⚡ Expand Inner JSON"}
+                    </button>
+                  )}
+                </span>
+              );
+            }
+
+            if (row.type === "number") {
+              return (
+                <span class="text-moonlight-number font-semibold">
+                  {highlightText(row.value)}
+                </span>
+              );
+            }
+
+            if (row.type === "boolean") {
+              return (
+                <span class="text-moonlight-boolean font-semibold">
+                  {highlightText(String(row.value))}
+                </span>
+              );
+            }
+
+            if (row.type === "null") {
+              return (
+                <span class="text-moonlight-null italic">
+                  {highlightText("null")}
+                </span>
+              );
+            }
+
+            return null;
+          };
+
+          if (row.type === "object_end") {
+            return (
+              <div
+                style={indentStyle}
+                class="py-0.5 text-moonlight-bracket font-bold select-none fira-code"
+              >
+                {"}"}
+                {!row.isLast && ","}
+              </div>
+            );
+          }
+
+          if (row.type === "array_end") {
+            return (
+              <div
+                style={indentStyle}
+                class="py-0.5 text-moonlight-bracket font-bold select-none fira-code"
+              >
+                {"]"}
+                {!row.isLast && ","}
+              </div>
+            );
+          }
+
+          return (
+            <div class="flex flex-col">
+              <div
+                style={indentStyle}
+                class="group py-1 hover:bg-moonlight-active/60 rounded-lg transition-colors flex items-center gap-1.5 fira-code text-xs leading-relaxed text-slate-200"
+              >
+                {/* Toggle Arrow */}
+                {row.isExpandable ? (
+                  <button
+                    onClick={() => onToggle(row.path)}
+                    class="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-sky-300 transition-colors focus:outline-none"
+                  >
+                    <i
+                      data-lucide="chevron-right"
+                      class={`w-3.5 h-3.5 transform transition-transform ${!row.isCollapsed ? "rotate-90" : ""}`}
+                    ></i>
+                  </button>
+                ) : (
+                  <span class="w-4"></span>
+                )}
+
+                {/* Key Name */}
+                {row.keyName !== null && (
+                  <span class="text-moonlight-key font-semibold">
+                    "{highlightText(row.keyName, true)}":
+                  </span>
+                )}
+
+                {/* Expandable Headers */}
+                {row.type === "object" && (
+                  <span class="text-moonlight-bracket font-semibold">
+                    {"{"}
+                    {row.isCollapsed && (
+                      <span
+                        onClick={() => onToggle(row.path)}
+                        class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
+                      >
+                        ... {row.childCount}{" "}
+                        {row.childCount === 1 ? "item" : "items"} ...
+                      </span>
+                    )}
+                    {row.isCollapsed && "}"}
+                    {row.isCollapsed && !row.isLast && ","}
+                  </span>
+                )}
+
+                {row.type === "array" && (
+                  <span class="text-moonlight-bracket font-semibold">
+                    {"["}
+                    {row.isCollapsed && (
+                      <span
+                        onClick={() => onToggle(row.path)}
+                        class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
+                      >
+                        ... {row.childCount}{" "}
+                        {row.childCount === 1 ? "item" : "items"} ...
+                      </span>
+                    )}
+                    {row.isCollapsed && "]"}
+                    {row.isCollapsed && !row.isLast && ","}
+                  </span>
+                )}
+
+                {/* Primitive Value */}
+                {!row.isExpandable && renderValue()}
+                {!row.isExpandable && !row.isLast && (
+                  <span class="text-moonlight-bracket">,</span>
+                )}
+              </div>
+
+              {/* Embedded Sub-Tree */}
+              {showEmbedded && embeddedParsed && (
+                <div class="ml-8 my-2 p-3 bg-slate-900/90 border border-moonlight-embedded/30 rounded-xl shadow-lg">
+                  <div class="text-[11px] text-moonlight-embedded font-semibold mb-1.5 flex items-center gap-1.5">
+                    <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+                    Nested Parsed Object:
+                  </div>
+                  <NestedViewer data={embeddedParsed} onCopyText={onCopyText} />
+                </div>
+              )}
+            </div>
+          );
+        },
+      );
+
+      // Helper for rendering embedded JSON inside strings
+      function NestedViewer({ data, onCopyText }) {
+        const [collapsedPaths, setCollapsedPaths] = useState(new Set());
+        const rows = useMemo(
+          () => flattenTree(data, collapsedPaths),
+          [data, collapsedPaths],
+        );
+
+        const handleToggle = (path) => {
+          setCollapsedPaths((prev) => {
+            const next = new Set(prev);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
+            return next;
+          });
+        };
+
+        return (
+          <div class="flex flex-col">
+            {rows.map((row, idx) => (
+              <TreeRow
+                key={idx}
+                row={row}
+                onToggle={handleToggle}
+                searchQuery=""
+                onCopyText={onCopyText}
+              />
+            ))}
+          </div>
+        );
+      }
+
+      // --- MAIN VIRTUALIZED TREE VIEWER ---
+      function VirtualizedJsonTree({
+        data,
+        searchQuery,
+        activeMatchIndex,
+        currentMatchIndex,
+        onCopyText,
+      }) {
+        const [collapsedPaths, setCollapsedPaths] = useState(new Set());
+        const containerRef = useRef(null);
+
+        // Flatten tree based on collapse state
+        const rows = useMemo(() => {
+          return flattenTree(data, collapsedPaths);
+        }, [data, collapsedPaths]);
+
+        // Handle collapse / expand
+        const handleToggle = useCallback((path) => {
+          setCollapsedPaths((prev) => {
+            const next = new Set(prev);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
+            return next;
+          });
+        }, []);
+
+        const expandAll = () => setCollapsedPaths(new Set());
+
+        const collapseAll = () => {
+          const allPaths = new Set();
+          const collectPaths = (obj, path = "") => {
+            if (typeof obj === "object" && obj !== null) {
+              if (path) allPaths.add(path);
+              Object.keys(obj).forEach((k) => {
+                collectPaths(obj[k], path ? `${path}.${k}` : k);
+              });
+            }
+          };
+          collectPaths(data);
+          setCollapsedPaths(allPaths);
+        };
+
+        // Custom Virtualization Logic (High Efficiency)
+        const ROW_HEIGHT = 28;
+        const [scrollTop, setScrollTop] = useState(0);
+        const [containerHeight, setContainerHeight] = useState(600);
+
+        useEffect(() => {
+          const el = containerRef.current;
+          if (!el) return;
+
+          const handleScroll = () => {
+            setScrollTop(el.scrollTop);
+          };
+
+          const observer = new ResizeObserver((entries) => {
+            if (entries[0]) {
+              setContainerHeight(entries[0].contentRect.height);
+            }
+          });
+
+          el.addEventListener("scroll", handleScroll);
+          observer.observe(el);
+
+          return () => {
+            el.removeEventListener("scroll", handleScroll);
+            observer.disconnect();
+          };
+        }, []);
+
+        const totalHeight = rows.length * ROW_HEIGHT;
+        const OVERSCAN = 15;
+        const startIndex = Math.max(
+          0,
+          Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN,
+        );
+        const endIndex = Math.min(
+          rows.length,
+          Math.ceil((scrollTop + containerHeight) / ROW_HEIGHT) + OVERSCAN,
+        );
+
+        const visibleRows = useMemo(() => {
+          return rows.slice(startIndex, endIndex).map((row, idx) => ({
+            row,
+            index: startIndex + idx,
+          }));
+        }, [rows, startIndex, endIndex]);
+
+        // Re-initialize icons when visible items change
+        useEffect(() => {
+          if (window.lucide) {
+            window.lucide.createIcons();
+          }
+        }, [visibleRows]);
+
+        return (
+          <div class="h-full flex flex-col bg-moonlight-editor text-slate-100 rounded-2xl shadow-moonlight border border-slate-800 overflow-hidden">
+            {/* Header Bar */}
+            <div class="px-4 py-2.5 bg-moonlight-bg border-b border-slate-800 flex items-center justify-between text-xs font-sans">
+              <div class="flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-red-500/80 inline-block"></span>
+                <span class="w-3 h-3 rounded-full bg-amber-500/80 inline-block"></span>
+                <span class="w-3 h-3 rounded-full bg-emerald-500/80 inline-block"></span>
+                <span class="ml-2 font-mono text-[11px] text-slate-400 font-semibold tracking-wide">
+                  MOONLIGHT JSON VIEWER
+                </span>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button
+                  onClick={expandAll}
+                  class="px-2.5 py-1 bg-moonlight-editor hover:bg-moonlight-active border border-slate-700/80 rounded-lg text-slate-300 hover:text-white transition-all active:scale-95 flex items-center gap-1 font-medium text-[11px]"
+                >
+                  <i data-lucide="unfold-horizontal" class="w-3 h-3"></i> Expand
+                  All
+                </button>
+                <button
+                  onClick={collapseAll}
+                  class="px-2.5 py-1 bg-moonlight-editor hover:bg-moonlight-active border border-slate-700/80 rounded-lg text-slate-300 hover:text-white transition-all active:scale-95 flex items-center gap-1 font-medium text-[11px]"
+                >
+                  <i data-lucide="fold-horizontal" class="w-3 h-3"></i> Collapse
+                  All
+                </button>
+              </div>
+            </div>
+
+            {/* Virtualized Container */}
+            <div
+              ref={containerRef}
+              class="flex-1 overflow-auto p-4 relative moonlight-scroll"
+            >
+              <div
+                style={{
+                  height: `${totalHeight}px`,
+                  width: "100%",
+                  position: "relative",
+                }}
+              >
+                {visibleRows.map(({ row, index }) => (
+                  <div
+                    key={row.path || index}
+                    style={{
+                      position: "absolute",
+                      top: `${index * ROW_HEIGHT}px`,
+                      left: 0,
+                      right: 0,
+                      height: `${ROW_HEIGHT}px`,
+                    }}
+                  >
+                    <TreeRow
+                      row={row}
+                      onToggle={handleToggle}
+                      searchQuery={searchQuery}
+                      activeMatchIndex={activeMatchIndex}
+                      currentMatchIndex={currentMatchIndex}
+                      onCopyText={onCopyText}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      // --- MAIN STUDIO APP COMPONENT ---
+      function LogJsonStudio({ onBackToHome }) {
+        const [rawLog, setRawLog] = useState("");
+        const [parsedJson, setParsedJson] = useState(null);
+        const [errorDetails, setErrorDetails] = useState(null);
+        const [splitOffset, setSplitOffset] = useState(40); // 40% left panel
+        const [isDragging, setIsDragging] = useState(false);
+
+        // Search state
+        const [searchQuery, setSearchQuery] = useState("");
+        const [matches, setMatches] = useState([]);
+        const [currentMatchIdx, setCurrentMatchIdx] = useState(0);
+
+        // Toast notification
+        const [toastMsg, setToastMsg] = useState("");
+
+        const showToast = (msg) => {
+          setToastMsg(msg);
+          setTimeout(() => setToastMsg(""), 2500);
+        };
+
+        // Auto-extract and parse when rawLog changes
+        useEffect(() => {
+          if (!rawLog.trim()) {
+            setParsedJson(null);
+            setErrorDetails(null);
+            return;
+          }
+
+          const extracted = extractFirstJson(rawLog);
+
+          if (!extracted) {
+            setParsedJson(null);
+            setErrorDetails({
+              line: 1,
+              column: 1,
+              message:
+                "No valid JSON object or array could be detected in the provided text.",
+            });
+            return;
+          }
+
+          try {
+            const result = JSON.parse(extracted);
+            setParsedJson(result);
+            setErrorDetails(null);
+          } catch (err) {
+            setParsedJson(null);
+            const errPos = parseErrorPosition(err.message, extracted);
+            setErrorDetails(errPos);
+          }
+        }, [rawLog]);
+
+        // Resizable Splitter Logic
+        const handleMouseDown = () => setIsDragging(true);
+
+        useEffect(() => {
+          const handleMouseMove = (e) => {
+            if (!isDragging) return;
+            const newOffset = (e.clientX / window.innerWidth) * 100;
+            if (newOffset > 15 && newOffset < 85) {
+              setSplitOffset(newOffset);
+            }
+          };
+
+          const handleMouseUp = () => setIsDragging(false);
+
+          if (isDragging) {
+            window.addEventListener("mousemove", handleMouseMove);
+            window.addEventListener("mouseup", handleMouseUp);
+          }
+
+          return () => {
+            window.removeEventListener("mousemove", handleMouseMove);
+            window.removeEventListener("mouseup", handleMouseUp);
+          };
+        }, [isDragging]);
+
+        // Search matching logic
+        useEffect(() => {
+          if (!searchQuery.trim() || !parsedJson) {
+            setMatches([]);
+            setCurrentMatchIdx(0);
+            return;
+          }
+
+          const jsonString = JSON.stringify(parsedJson, null, 2);
+          const regex = new RegExp(
+            searchQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+            "gi",
+          );
+          const found = [];
+          let match;
+
+          while ((match = regex.exec(jsonString)) !== null) {
+            found.push(match.index);
+          }
+
+          setMatches(found);
+          setCurrentMatchIdx(found.length > 0 ? 1 : 0);
+        }, [searchQuery, parsedJson]);
+
+        const handleNextMatch = () => {
+          if (matches.length === 0) return;
+          setCurrentMatchIdx((prev) => (prev % matches.length) + 1);
+        };
+
+        const handlePrevMatch = () => {
+          if (matches.length === 0) return;
+          setCurrentMatchIdx(
+            (prev) => ((prev - 2 + matches.length) % matches.length) + 1,
+          );
+        };
+
+        // Copy Formatted JSON
+        const handleCopyJson = () => {
+          if (!parsedJson) return;
+          const formatted = JSON.stringify(parsedJson, null, 2);
+
+          const tempTextArea = document.createElement("textarea");
+          tempTextArea.value = formatted;
+          document.body.appendChild(tempTextArea);
+          tempTextArea.select();
+          document.execCommand("copy");
+          document.body.removeChild(tempTextArea);
+
+          showToast("Formatted JSON copied to clipboard!");
+        };
+
+        // Copy Arbitrary Text
+        const handleCopyText = (text) => {
+          const tempTextArea = document.createElement("textarea");
+          tempTextArea.value = text;
+          document.body.appendChild(tempTextArea);
+          tempTextArea.select();
+          document.execCommand("copy");
+          document.body.removeChild(tempTextArea);
+
+          showToast("Text copied to clipboard!");
+        };
+
+        // Download JSON File
+        const handleDownloadJson = () => {
+          if (!parsedJson) return;
+          const formatted = JSON.stringify(parsedJson, null, 2);
+          const blob = new Blob([formatted], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `log-extracted-${Date.now()}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+          showToast("JSON file downloaded!");
+        };
+
+        // Refresh lucide icons
+        useEffect(() => {
+          if (window.lucide) {
+            window.lucide.createIcons();
+          }
+        });
+
+        return (
+          <div class="h-screen w-screen flex flex-col bg-slate-50 text-slate-800 select-none overflow-hidden font-sans">
+            {/* Header Bar - Light SaaS HeroUI Style */}
+            <header class="h-16 px-6 hero-glass border-b border-heroui-100 flex items-center justify-between z-20 shadow-heroui">
+              <div class="flex items-center gap-3">
+                <button
+                  onClick={onBackToHome}
+                  class="p-2 hover:bg-slate-100 border border-slate-200 text-slate-600 rounded-xl transition-all active:scale-95 flex items-center gap-2 text-xs font-semibold"
+                  title="Return to JTeller Tools"
+                >
+                  <i
+                    data-lucide="arrow-left"
+                    class="w-4 h-4 text-heroui-500"
+                  ></i>
+                  <span>JTeller Tools</span>
+                </button>
+
+                <div class="h-5 w-px bg-slate-200"></div>
+
+                <div class="flex items-center gap-2.5">
+                  <div class="w-9 h-9 rounded-xl bg-heroui-500 text-white flex items-center justify-center font-bold shadow-md shadow-heroui-500/20">
+                    <i data-lucide="file-json" class="w-5 h-5"></i>
+                  </div>
+                  <div>
+                    <h1 class="font-bold text-sm text-slate-900 tracking-tight flex items-center gap-2">
+                      Log JSON Studio
+                      <span class="text-[10px] font-semibold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">
+                        v2.5 HeroUI
+                      </span>
+                    </h1>
+                    <p class="text-[11px] text-slate-500 font-normal">
+                      Extract and format JSON from logs instantly
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Actions & Tools */}
+              <div class="flex items-center gap-3">
+                {/* Search Box */}
+                {parsedJson && (
+                  <div class="flex items-center bg-white border border-slate-200 rounded-xl px-3 py-1.5 shadow-sm focus-within:border-heroui-500 focus-within:ring-2 focus-within:ring-heroui-500/20 transition-all">
+                    <i
+                      data-lucide="search"
+                      class="w-4 h-4 text-slate-400 mr-2"
+                    ></i>
+                    <input
+                      type="text"
+                      placeholder="Search keys/values..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      class="bg-transparent text-xs text-slate-800 placeholder-slate-400 focus:outline-none w-36 sm:w-48 font-sans"
+                    />
+                    {matches.length > 0 && (
+                      <div class="flex items-center gap-1 ml-2 border-l border-slate-200 pl-2">
+                        <span class="text-[11px] text-slate-500 font-mono font-medium">
+                          {currentMatchIdx}/{matches.length}
+                        </span>
+                        <button
+                          onClick={handlePrevMatch}
+                          class="p-0.5 hover:bg-slate-100 rounded text-slate-600 active:scale-90"
+                        >
+                          <i data-lucide="chevron-up" class="w-3.5 h-3.5"></i>
+                        </button>
+                        <button
+                          onClick={handleNextMatch}
+                          class="p-0.5 hover:bg-slate-100 rounded text-slate-600 active:scale-90"
+                        >
+                          <i data-lucide="chevron-down" class="w-3.5 h-3.5"></i>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Copy & Download Buttons */}
+                <button
+                  onClick={handleCopyJson}
+                  disabled={!parsedJson}
+                  class={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 border ${
+                    parsedJson
+                      ? "bg-white hover:bg-slate-50 text-slate-700 border-slate-200 shadow-sm"
+                      : "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                  }`}
+                >
+                  <i data-lucide="copy" class="w-3.5 h-3.5 text-heroui-500"></i>
+                  <span>Copy JSON</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadJson}
+                  disabled={!parsedJson}
+                  class={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 shadow-sm ${
+                    parsedJson
+                      ? "bg-heroui-500 hover:bg-heroui-600 text-white shadow-heroui-500/25"
+                      : "bg-slate-200 text-slate-400 cursor-not-allowed"
+                  }`}
+                >
+                  <i data-lucide="download" class="w-3.5 h-3.5"></i>
+                  <span>Download</span>
+                </button>
+              </div>
+            </header>
+
+            {/* Main Layout Workspace */}
+            <div class="flex-1 flex overflow-hidden relative p-3 gap-1">
+              {/* Left Panel: Log Input Area */}
+              <div
+                style={{ width: `${splitOffset}%` }}
+                class="h-full flex flex-col bg-white rounded-2xl border border-slate-200/80 shadow-heroui p-3 overflow-hidden"
+              >
+                <div class="flex items-center justify-between mb-2 px-1">
+                  <span class="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                    <i
+                      data-lucide="terminal"
+                      class="w-4 h-4 text-heroui-500"
+                    ></i>
+                    Paste Log Output Here
+                  </span>
+                  {rawLog && (
+                    <button
+                      onClick={() => setRawLog("")}
+                      class="text-[11px] text-slate-400 hover:text-red-500 transition-colors font-medium flex items-center gap-1"
+                    >
+                      <i data-lucide="trash-2" class="w-3 h-3"></i> Clear
+                    </button>
+                  )}
+                </div>
+
+                <textarea
+                  value={rawLog}
+                  onChange={(e) => setRawLog(e.target.value)}
+                  placeholder='Paste raw log lines containing JSON here...&#10;&#10;Example:&#10;INFO 2026-01-01 [Srv003] ResponseObj@a1b2c3{"status":200,"data":{"user":"Admin"}}'
+                  class="flex-1 w-full bg-slate-50 border border-slate-200/80 rounded-xl p-3.5 text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-heroui-500/20 focus:border-heroui-500 resize-none leading-relaxed fira-code"
+                ></textarea>
+
+                <div class="mt-2.5 flex items-center justify-between text-[11px] text-slate-500 px-1 font-medium">
+                  <span>Auto-detection enabled</span>
+                  <span>{rawLog.length.toLocaleString()} characters</span>
+                </div>
+              </div>
+
+              {/* Splitter Handle */}
+              <div
+                onMouseDown={handleMouseDown}
+                class="w-2 hover:w-2 bg-transparent hover:bg-heroui-500/30 cursor-col-resize transition-all rounded-full flex items-center justify-center group"
+              >
+                <div class="w-1 h-8 bg-slate-300 group-hover:bg-heroui-500 rounded-full transition-colors"></div>
+              </div>
+
+              {/* Right Panel: JSON Moonlight Tree Viewer */}
+              <div
+                style={{ width: `${100 - splitOffset}%` }}
+                class="h-full flex flex-col overflow-hidden"
+              >
+                {parsedJson ? (
+                  <VirtualizedJsonTree
+                    data={parsedJson}
+                    searchQuery={searchQuery}
+                    activeMatchIndex={matches[currentMatchIdx - 1]}
+                    currentMatchIndex={currentMatchIdx}
+                    onCopyText={handleCopyText}
+                  />
+                ) : errorDetails ? (
+                  <div class="h-full bg-white rounded-2xl border border-red-200 shadow-heroui p-8 flex flex-col items-center justify-center text-center">
+                    <div class="w-14 h-14 bg-red-50 text-red-500 rounded-2xl flex items-center justify-center mb-4 border border-red-100 shadow-sm">
+                      <i data-lucide="alert-circle" class="w-8 h-8"></i>
+                    </div>
+                    <h3 class="text-base font-bold text-slate-800 mb-1">
+                      No Valid JSON Found
+                    </h3>
+                    <p class="text-xs text-slate-500 max-w-md mb-6">
+                      {errorDetails.message}
+                    </p>
+
+                    <div class="bg-red-50/80 border border-red-200/80 rounded-xl p-4 text-left w-full max-w-md font-mono text-xs">
+                      <div class="flex items-center justify-between text-red-700 font-bold mb-1">
+                        <span>Parser Details</span>
+                        <span class="bg-red-200/60 px-2 py-0.5 rounded-md text-[10px]">
+                          Syntax Error
+                        </span>
+                      </div>
+                      <div class="text-slate-700 text-[11px]">
+                        Line: <span class="font-bold">{errorDetails.line}</span>{" "}
+                        | Column:{" "}
+                        <span class="font-bold">{errorDetails.column}</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div class="h-full bg-white rounded-2xl border border-slate-200/80 shadow-heroui p-8 flex flex-col items-center justify-center text-center">
+                    <div class="w-16 h-16 bg-slate-50 text-slate-300 rounded-2xl flex items-center justify-center mb-4 border border-slate-100">
+                      <i data-lucide="file-code-2" class="w-8 h-8"></i>
+                    </div>
+                    <h3 class="text-sm font-bold text-slate-700 mb-1">
+                      Awaiting Log Input
+                    </h3>
+                    <p class="text-xs text-slate-400 max-w-xs">
+                      Paste raw log content in the left panel to automatically
+                      extract and display the Moonlight JSON tree view.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Toast Notification */}
+            {toastMsg && (
+              <div class="fixed bottom-6 right-6 bg-slate-900 text-white px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xl flex items-center gap-2 border border-slate-700 z-50 animate-bounce">
+                <i
+                  data-lucide="check-circle-2"
+                  class="w-4 h-4 text-emerald-400"
+                ></i>
+                <span>{toastMsg}</span>
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      // --- MAIN DASHBOARD APP (JTeller Tools) ---
+      function JTellerToolsApp() {
+        const [currentApp, setCurrentApp] = useState("home"); // 'home' or 'json-studio'
+
+        // Refresh lucide icons
+        useEffect(() => {
+          if (window.lucide) {
+            window.lucide.createIcons();
+          }
+        });
+
+        if (currentApp === "json-studio") {
+          return <LogJsonStudio onBackToHome={() => setCurrentApp("home")} />;
+        }
+
+        return (
+          <div class="h-screen w-screen flex flex-col overflow-hidden bg-grid-pattern">
+            {/* Centered Main 3x2 Grid Container */}
+            <main class="flex-1 flex items-center justify-center p-6 overflow-auto">
+              <div class="w-full max-w-4xl my-auto">
+                {/* Grid 3x2 */}
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {/* TOOL 1: Log JSON Studio */}
+                  <div
+                    class="group bg-white hover:border-[#F09770] border border-gray-200 rounded-2xl p-6 transition-all duration-300 flex flex-col justify-between h-40 relative overflow-hidden cursor-pointer"
+                    onClick={() => setCurrentApp("json-studio")}
+                  >
+                    {" "}
+                    <div class="flex items-center justify-between mb-2">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="text-[#F09770]"
+                        width="24"
+                        height="24"
+                        viewBox="0 0 24 24"
+                      >
+                        <g fill="none">
+                          <path
+                            fill="currentColor"
+                            d="m15.393 4.054l-.502.557zm3.959 3.563l-.502.557zm2.302 2.537l-.685.305zM3.172 20.828l.53-.53zm17.656 0l-.53-.53zM14 21.25h-4v1.5h4zM2.75 14v-4h-1.5v4zm18.5-.437V14h1.5v-.437zM14.891 4.61l3.959 3.563l1.003-1.115l-3.958-3.563zm7.859 8.952c0-1.689.015-2.758-.41-3.714l-1.371.61c.266.598.281 1.283.281 3.104zm-3.9-5.389c1.353 1.218 1.853 1.688 2.119 2.285l1.37-.61c-.426-.957-1.23-1.66-2.486-2.79zM10.03 2.75c1.582 0 2.179.012 2.71.216l.538-1.4c-.852-.328-1.78-.316-3.248-.316zm5.865.746c-1.086-.977-1.765-1.604-2.617-1.93l-.537 1.4c.532.204.98.592 2.15 1.645zM10 21.25c-1.907 0-3.261-.002-4.29-.14c-1.005-.135-1.585-.389-2.008-.812l-1.06 1.06c.748.75 1.697 1.081 2.869 1.239c1.15.155 2.625.153 4.489.153zM1.25 14c0 1.864-.002 3.338.153 4.489c.158 1.172.49 2.121 1.238 2.87l1.06-1.06c-.422-.424-.676-1.004-.811-2.01c-.138-1.027-.14-2.382-.14-4.289zM14 22.75c1.864 0 3.338.002 4.489-.153c1.172-.158 2.121-.49 2.87-1.238l-1.06-1.06c-.424.422-1.004.676-2.01.811c-1.027.138-2.382.14-4.289.14zM21.25 14c0 1.907-.002 3.262-.14 4.29c-.135 1.005-.389 1.585-.812 2.008l1.06 1.06c.75-.748 1.081-1.697 1.239-2.869c.155-1.15.153-2.625.153-4.489zm-18.5-4c0-1.907.002-3.261.14-4.29c.135-1.005.389-1.585.812-2.008l-1.06-1.06c-.75.748-1.081 1.697-1.239 2.869C1.248 6.661 1.25 8.136 1.25 10zm7.28-8.75c-1.875 0-3.356-.002-4.511.153c-1.177.158-2.129.49-2.878 1.238l1.06 1.06c.424-.422 1.005-.676 2.017-.811c1.033-.138 2.395-.14 4.312-.14z"
+                          />
+                          <path
+                            stroke="currentColor"
+                            stroke-linecap="round"
+                            stroke-width="1"
+                            d="M6 14.5h8M6 18h5.5"
+                          />
+                          <path
+                            stroke="currentColor"
+                            stroke-width="1"
+                            d="M13 2.5V5c0 2.357 0 3.536.732 4.268S15.643 10 18 10h4"
+                          />
+                        </g>
+                      </svg>
+                    </div>
+                    <h2 class="text-base font-bold text-[#101010] mb-1.5 transition-colors">
+                      Log JSON Studio
+                    </h2>
+                    <p class="text-[#9D9D9D] font-light text-sm">
+                      Extracts and formats embedded JSON from raw logs instantly
+                    </p>
+                  </div>
+
+                  {/* SLOT 2: Empty Placeholder */}
+                  {Array.from({ length: 5 }).map((_, index) => {
+                    return (
+                      <div
+                        key={`empty-placeholder-${index}`}
+                        class="border-[1.5px] border-dashed bg-gray-50 border-gray-200 rounded-2xl p-6 flex flex-col h-40 items-center justify-center text-center group transition-all"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                          class="size-5 text-[#9D9D9D]"
+                        >
+                          <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+                          <g
+                            id="SVGRepo_tracerCarrier"
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                          ></g>
+                          <g id="SVGRepo_iconCarrier">
+                            {" "}
+                            <path
+                              d="M4 12H20M12 4V20"
+                              stroke="#9d9d9d"
+                              stroke-width="1.5"
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                            ></path>{" "}
+                          </g>
+                        </svg>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </main>
+
+            {/* Footer */}
+            <footer class="text-center p-4 text-xs text-gray-400">
+              Made with ❤️ by{" "}
+              <a
+                href="https://axelestrada.github.io"
+                target="_blank"
+                class="text-heroui-500 font-semibold transition-all hover:scale-105 inline-block"
+              >
+                Axel Estrada
+              </a>
+            </footer>
+          </div>
+        );
+      }
+
+      // Render Root
+      const root = ReactDOM.createRoot(document.getElementById("root"));
+      root.render(<JTellerToolsApp />);
+    </script>
+  </body>
+</html>
