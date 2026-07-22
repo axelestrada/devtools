@@ -400,7 +400,7 @@
 
               return (
                 <span class="inline-flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
-                  <span class="text-moonlight-string font-medium whitespace-nowrap">
+                  <span class="text-moonlight-string font-regular whitespace-nowrap">
                     "{highlightText(val)}"
                   </span>
 
@@ -439,7 +439,7 @@
                   {embeddedParsed && (
                     <button
                       onClick={() => setShowEmbedded(!showEmbedded)}
-                      class="tree-row-control text-[10px] bg-moonlight-embedded/20 text-moonlight-embedded border border-moonlight-embedded/40 px-2 py-0.5 rounded-full hover:bg-moonlight-embedded/30 transition-all font-semibold active:scale-95"
+                      class="tree-row-control text-[10px] bg-moonlight-embedded/20 text-moonlight-embedded border border-moonlight-embedded/40 px-2 py-0.5 rounded-full hover:bg-moonlight-embedded/30 transition-all font-regular active:scale-95"
                     >
                       {showEmbedded
                         ? "Hide Inner JSON"
@@ -452,7 +452,7 @@
 
             if (row.type === "number") {
               return (
-                <span class="text-moonlight-number font-semibold">
+                <span class="text-moonlight-number font-regular">
                   {highlightText(row.value)}
                 </span>
               );
@@ -460,7 +460,7 @@
 
             if (row.type === "boolean") {
               return (
-                <span class="text-moonlight-boolean font-semibold">
+                <span class="text-moonlight-boolean font-regular">
                   {highlightText(String(row.value))}
                 </span>
               );
@@ -468,7 +468,7 @@
 
             if (row.type === "null") {
               return (
-                <span class="text-moonlight-null italic">
+                <span class="text-moonlight-null italic font-regular">
                   {highlightText("null")}
                 </span>
               );
@@ -481,7 +481,7 @@
             return (
               <div
                 style={indentStyle}
-                class="py-0.5 text-moonlight-bracket font-bold fira-code"
+                class="py-0.5 text-moonlight-bracket font-regular fira-code"
               >
                 {"}"}
                 {!row.isLast && ","}
@@ -493,7 +493,7 @@
             return (
               <div
                 style={indentStyle}
-                class="py-0.5 text-moonlight-bracket font-bold fira-code"
+                class="py-0.5 text-moonlight-bracket font-regular fira-code"
               >
                 {"]"}
                 {!row.isLast && ","}
@@ -515,7 +515,7 @@
                   >
                     <i
                       data-lucide="chevron-right"
-                      class={`w-3.5 h-3.5 transform transition-transform ${!row.isCollapsed ? "rotate-90" : ""}`}
+                      class={`w-3.5 h-3.5 transform transition-transform ${!row.isCollapsed ? "rotate-90" : "rotate-0"}`}
                     ></i>
                   </button>
                 ) : (
@@ -525,14 +525,14 @@
                 <div class="min-w-max flex-1 flex flex-nowrap items-center gap-1.5 tree-row-text">
                   {/* Key Name */}
                   {row.keyName !== null && (
-                    <span class="text-moonlight-key font-semibold">
+                    <span class="text-moonlight-key font-regular">
                       "{highlightText(row.keyName, true)}":
                     </span>
                   )}
 
                   {/* Expandable Headers */}
                   {row.type === "object" && (
-                    <span class="text-moonlight-bracket font-semibold">
+                    <span class="text-moonlight-bracket font-regular">
                       {"{"}
                       {row.isCollapsed && (
                         <span
@@ -549,7 +549,7 @@
                   )}
 
                   {row.type === "array" && (
-                    <span class="text-moonlight-bracket font-semibold">
+                    <span class="text-moonlight-bracket font-regular">
                       {"["}
                       {row.isCollapsed && (
                         <span
@@ -568,7 +568,7 @@
                   {/* Primitive Value */}
                   {!row.isExpandable && renderValue()}
                   {!row.isExpandable && !row.isLast && (
-                    <span class="text-moonlight-bracket">,</span>
+                    <span class="text-moonlight-bracket font-regular">,</span>
                   )}
                 </div>
               </div>
@@ -576,7 +576,7 @@
               {/* Embedded Sub-Tree */}
               {showEmbedded && embeddedParsed && (
                 <div class="ml-8 my-2 p-3 bg-slate-900/90 border border-moonlight-embedded/30 rounded-xl shadow-lg">
-                  <div class="text-[11px] text-moonlight-embedded font-semibold mb-1.5 flex items-center gap-1.5">
+                  <div class="text-[11px] text-moonlight-embedded font-regular mb-1.5 flex items-center gap-1.5">
                     <i data-lucide="layers" class="w-3.5 h-3.5"></i>
                     Nested Parsed Object:
                   </div>
