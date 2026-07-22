@@ -127,12 +127,27 @@
 
       .tree-row-content {
         min-width: 0;
+        user-select: text !important;
       }
 
       .tree-row-text {
         overflow-wrap: anywhere;
         word-break: break-word;
         white-space: normal;
+        user-select: text !important;
+      }
+
+      .tree-row-content,
+      .tree-row-text,
+      .text-moonlight-bracket,
+      .text-moonlight-bracket * {
+        user-select: text !important;
+      }
+
+      .tree-row-control,
+      .tree-row-content button,
+      .tree-row-content a {
+        user-select: none !important;
       }
     </style>
   </head>
@@ -394,20 +409,20 @@
                       href={val}
                       target="_blank"
                       rel="noopener noreferrer"
-                      class="text-xs bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 px-1.5 py-0.5 rounded-full inline-flex items-center gap-1 transition-all"
+                      class="tree-row-control text-xs bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 px-1.5 py-0.5 rounded-full inline-flex items-center gap-1 transition-all"
                     >
                       <i data-lucide="external-link" class="w-3 h-3"></i> Link
                     </a>
                   )}
 
                   {isIso && (
-                    <span class="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded-full font-mono">
+                    <span class="tree-row-control text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded-full font-mono">
                       ISO Date
                     </span>
                   )}
 
                   {isUuid && (
-                    <span class="text-[10px] bg-teal-500/20 text-teal-300 border border-teal-500/30 px-1.5 py-0.2 rounded-full font-mono">
+                    <span class="tree-row-control text-[10px] bg-teal-500/20 text-teal-300 border border-teal-500/30 px-1.5 py-0.2 rounded-full font-mono">
                       UUID
                     </span>
                   )}
@@ -415,7 +430,7 @@
                   {isBase64 && (
                     <button
                       onClick={() => onCopyText(val)}
-                      class="text-[10px] bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 px-1.5 py-0.2 rounded-full transition-all active:scale-95"
+                      class="tree-row-control text-[10px] bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 px-1.5 py-0.2 rounded-full transition-all active:scale-95"
                     >
                       Copy Base64
                     </button>
@@ -424,7 +439,7 @@
                   {embeddedParsed && (
                     <button
                       onClick={() => setShowEmbedded(!showEmbedded)}
-                      class="text-[10px] bg-moonlight-embedded/20 text-moonlight-embedded border border-moonlight-embedded/40 px-2 py-0.5 rounded-full hover:bg-moonlight-embedded/30 transition-all font-semibold active:scale-95"
+                      class="tree-row-control text-[10px] bg-moonlight-embedded/20 text-moonlight-embedded border border-moonlight-embedded/40 px-2 py-0.5 rounded-full hover:bg-moonlight-embedded/30 transition-all font-semibold active:scale-95"
                     >
                       {showEmbedded
                         ? "Hide Inner JSON"
@@ -466,7 +481,7 @@
             return (
               <div
                 style={indentStyle}
-                class="py-0.5 text-moonlight-bracket font-bold select-none fira-code"
+                class="py-0.5 text-moonlight-bracket font-bold fira-code"
               >
                 {"}"}
                 {!row.isLast && ","}
@@ -478,7 +493,7 @@
             return (
               <div
                 style={indentStyle}
-                class="py-0.5 text-moonlight-bracket font-bold select-none fira-code"
+                class="py-0.5 text-moonlight-bracket font-bold fira-code"
               >
                 {"]"}
                 {!row.isLast && ","}
@@ -734,7 +749,7 @@
             {/* Virtualized Container */}
             <div
               ref={containerRef}
-              class="flex-1 overflow-auto p-4 relative moonlight-scroll"
+              class="flex-1 overflow-auto p-4 relative moonlight-scroll text-sm"
             >
               <div
                 style={{
@@ -934,7 +949,7 @@
         });
 
         return (
-          <div class="h-screen w-screen flex flex-col bg-slate-50 text-slate-800 select-none overflow-hidden font-sans">
+          <div class="h-screen w-screen flex flex-col bg-slate-50 text-slate-800 overflow-hidden font-sans">
             {/* Header Bar - Light SaaS HeroUI Style */}
             <header class="h-16 px-6 hero-glass border-b border-heroui-100 flex items-center justify-between z-20 shadow-heroui">
               <div class="flex items-center gap-3">
