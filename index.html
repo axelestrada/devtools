@@ -222,6 +222,258 @@
         return null;
       }
 
+      function parseJavaLikeLogToJson(text) {
+        if (!text || typeof text !== "string") return null;
+
+        const source = text.trim();
+        if (!source) return null;
+
+        const state = {
+          text: source,
+          pos: 0,
+
+          skipWhitespace() {
+            while (this.pos < this.text.length && /\s/.test(this.text[this.pos])) {
+              this.pos++;
+            }
+          },
+
+          peek() {
+            return this.text[this.pos];
+          },
+
+          consume(ch) {
+            if (this.text[this.pos] !== ch) {
+              throw new Error(`Expected '${ch}'`);
+            }
+            this.pos++;
+          },
+
+          readIdentifier() {
+            const start = this.pos;
+            if (!/[A-Za-z_$]/.test(this.peek() || "")) {
+              return "";
+            }
+
+            this.pos++;
+            while (
+              this.pos < this.text.length &&
+              /[A-Za-z0-9_$.-]/.test(this.peek() || "")
+            ) {
+              this.pos++;
+            }
+
+            return this.text.slice(start, this.pos);
+          },
+
+          readUntilDelimiter() {
+            let depth = 0;
+            let inString = false;
+            let escaped = false;
+            const start = this.pos;
+
+            while (this.pos < this.text.length) {
+              const ch = this.text[this.pos];
+
+              if (inString) {
+                if (escaped) {
+                  escaped = false;
+                } else if (ch === "\\") {
+                  escaped = true;
+                } else if (ch === '"') {
+                  inString = false;
+                }
+                this.pos++;
+                continue;
+              }
+
+              if (ch === '"') {
+                inString = true;
+                this.pos++;
+                continue;
+              }
+
+              if (ch === "[" || ch === "{") {
+                depth++;
+              } else if (ch === "]" || ch === "}") {
+                if (depth === 0) {
+                  break;
+                }
+                depth--;
+              } else if (depth === 0 && (ch === "," || ch === "]" || ch === "}")) {
+                break;
+              }
+
+              this.pos++;
+            }
+
+            return this.text.slice(start, this.pos).trim();
+          },
+
+          parseArray() {
+            this.consume("[");
+            this.skipWhitespace();
+            const result = [];
+
+            if (this.peek() === "]") {
+              this.consume("]");
+              return result;
+            }
+
+            while (true) {
+              this.skipWhitespace();
+              if (this.peek() === "]") {
+                this.consume("]");
+                break;
+              }
+
+              result.push(this.parseValue());
+              this.skipWhitespace();
+
+              if (this.peek() === ",") {
+                this.consume(",");
+                continue;
+              }
+
+              if (this.peek() === "]") {
+                this.consume("]");
+                break;
+              }
+
+              throw new Error("Expected ',' or ']' in array");
+            }
+
+            return result;
+          },
+
+          parseObjectBody() {
+            this.consume("{");
+            const result = {};
+            this.skipWhitespace();
+
+            if (this.peek() === "}") {
+              this.consume("}");
+              return result;
+            }
+
+            while (true) {
+              this.skipWhitespace();
+              if (this.peek() === "}") {
+                this.consume("}");
+                break;
+              }
+
+              const key = this.readIdentifier();
+              if (!key) {
+                throw new Error("Expected property name");
+              }
+
+              this.skipWhitespace();
+              if (this.peek() === "=") {
+                this.consume("=");
+                this.skipWhitespace();
+                result[key] = this.parseValue();
+              } else {
+                throw new Error(`Expected '=' after property '${key}'`);
+              }
+
+              this.skipWhitespace();
+              if (this.peek() === ",") {
+                this.consume(",");
+                continue;
+              }
+              if (this.peek() === "}") {
+                this.consume("}");
+                break;
+              }
+
+              throw new Error("Expected ',' or '}' in object");
+            }
+
+            return result;
+          },
+
+          parseValue() {
+            this.skipWhitespace();
+            if (this.pos >= this.text.length) return "";
+
+            const ch = this.peek();
+            if (ch === "[") return this.parseArray();
+            if (ch === "{") return this.parseObjectBody();
+
+            if (ch === '"') {
+              this.consume('"');
+              let escaped = false;
+              let value = "";
+
+              while (this.pos < this.text.length) {
+                const currentChar = this.text[this.pos];
+                if (escaped) {
+                  value += currentChar;
+                  escaped = false;
+                } else if (currentChar === "\\") {
+                  escaped = true;
+                } else if (currentChar === '"') {
+                  this.pos++;
+                  break;
+                } else {
+                  value += currentChar;
+                }
+                this.pos++;
+              }
+
+              return value;
+            }
+
+            const start = this.pos;
+            const name = this.readIdentifier();
+            if (name) {
+              this.skipWhitespace();
+              if (this.peek() === "{") {
+                return { [name]: this.parseObjectBody() };
+              }
+              this.pos = start;
+            }
+
+            const token = this.readUntilDelimiter();
+            if (token === "") return "";
+
+            const trimmed = token.trim();
+            if (trimmed === "true") return true;
+            if (trimmed === "false") return false;
+            if (trimmed === "null") return null;
+            if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed);
+            return trimmed;
+          },
+        };
+
+        const parsed = state.parseValue();
+        state.skipWhitespace();
+        return parsed;
+      }
+
+      function parseLogText(text) {
+        if (!text || typeof text !== "string") return null;
+
+        const trimmed = text.trim();
+        if (!trimmed) return null;
+
+        const extractedJson = extractFirstJson(trimmed);
+        if (extractedJson) {
+          try {
+            return JSON.parse(extractedJson);
+          } catch (e) {
+            // fall through to Java-like parsing
+          }
+        }
+
+        try {
+          return parseJavaLikeLogToJson(trimmed);
+        } catch (e) {
+          return null;
+        }
+      }
+
       function parseErrorPosition(errorMsg, text) {
         const match =
           errorMsg.match(/at position (\d+)/i) ||
@@ -863,28 +1115,21 @@
             return;
           }
 
-          const extracted = extractFirstJson(rawLog);
+          const result = parseLogText(rawLog);
 
-          if (!extracted) {
+          if (!result) {
             setParsedJson(null);
             setErrorDetails({
               line: 1,
               column: 1,
               message:
-                "No valid JSON object or array could be detected in the provided text.",
+                "No valid JSON object, array, or supported log format could be detected in the provided text.",
             });
             return;
           }
 
-          try {
-            const result = JSON.parse(extracted);
-            setParsedJson(result);
-            setErrorDetails(null);
-          } catch (err) {
-            setParsedJson(null);
-            const errPos = parseErrorPosition(err.message, extracted);
-            setErrorDetails(errPos);
-          }
+          setParsedJson(result);
+          setErrorDetails(null);
         }, [rawLog]);
 
         // Resizable Splitter Logic
