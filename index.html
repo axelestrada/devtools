@@ -345,6 +345,7 @@
           activeMatchIndex,
           currentMatchIndex,
           onCopyText,
+          isActiveMatch = false,
         }) => {
           const [embeddedParsed, setEmbeddedParsed] = useState(null);
           const [showEmbedded, setShowEmbedded] = useState(false);
@@ -667,6 +668,32 @@
         const [scrollTop, setScrollTop] = useState(0);
         const [containerHeight, setContainerHeight] = useState(600);
 
+        const matchingRowIndexes = useMemo(() => {
+          if (!searchQuery.trim()) return [];
+
+          const query = searchQuery.toLowerCase();
+          return rows.reduce((acc, row, index) => {
+            const haystack = [
+              row.keyName !== null ? String(row.keyName) : "",
+              row.value !== undefined ? String(row.value) : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
+
+            if (haystack.toLowerCase().includes(query)) {
+              acc.push(index);
+            }
+
+            return acc;
+          }, []);
+        }, [rows, searchQuery]);
+
+        const activeMatchRowIndex = useMemo(() => {
+          if (!matchingRowIndexes.length || !currentMatchIndex) return null;
+          const targetIndex = currentMatchIndex - 1;
+          return matchingRowIndexes[Math.min(targetIndex, matchingRowIndexes.length - 1)];
+        }, [matchingRowIndexes, currentMatchIndex]);
+
         useEffect(() => {
           const el = containerRef.current;
           if (!el) return;
@@ -707,6 +734,26 @@
             index: startIndex + idx,
           }));
         }, [rows, startIndex, endIndex]);
+
+        useEffect(() => {
+          if (activeMatchRowIndex === null || activeMatchRowIndex === undefined) {
+            return;
+          }
+
+          const el = containerRef.current;
+          if (!el) return;
+
+          const targetTop = activeMatchRowIndex * ROW_HEIGHT;
+          const viewportTop = el.scrollTop;
+          const viewportBottom = viewportTop + el.clientHeight;
+
+          if (targetTop < viewportTop || targetTop > viewportBottom - ROW_HEIGHT) {
+            el.scrollTo({
+              top: Math.max(0, targetTop - 40),
+              behavior: "smooth",
+            });
+          }
+        }, [activeMatchRowIndex, ROW_HEIGHT]);
 
         // Re-initialize icons when visible items change
         useEffect(() => {
@@ -777,6 +824,7 @@
                       activeMatchIndex={activeMatchIndex}
                       currentMatchIndex={currentMatchIndex}
                       onCopyText={onCopyText}
+                      isActiveMatch={row.index === activeMatchRowIndex}
                     />
                   </div>
                 ))}
