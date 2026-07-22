@@ -124,6 +124,16 @@
         );
         background-size: 24px 24px;
       }
+
+      .tree-row-content {
+        min-width: 0;
+      }
+
+      .tree-row-text {
+        overflow-wrap: anywhere;
+        word-break: break-word;
+        white-space: normal;
+      }
     </style>
   </head>
   <body class="h-screen w-screen overflow-hidden bg-grid-pattern antialiased">
@@ -374,8 +384,8 @@
               const isBase64 = val.length > 20 && IS_BASE64.test(val);
 
               return (
-                <span class="inline-flex items-center gap-1.5 flex-wrap">
-                  <span class="text-moonlight-string font-medium">
+                <span class="inline-flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
+                  <span class="text-moonlight-string font-medium whitespace-nowrap">
                     "{highlightText(val)}"
                   </span>
 
@@ -480,13 +490,13 @@
             <div class="flex flex-col">
               <div
                 style={indentStyle}
-                class="group py-1 hover:bg-moonlight-active/60 rounded-lg transition-colors flex items-center gap-1.5 fira-code text-xs leading-relaxed text-slate-200"
+                class="group py-1 hover:bg-moonlight-active/60 rounded-lg transition-colors flex items-start gap-1.5 fira-code text-xs leading-relaxed text-slate-200 min-w-0 tree-row-content whitespace-nowrap"
               >
                 {/* Toggle Arrow */}
                 {row.isExpandable ? (
                   <button
                     onClick={() => onToggle(row.path)}
-                    class="w-4 h-4 flex items-center justify-center text-slate-400 hover:text-sky-300 transition-colors focus:outline-none"
+                    class="w-4 h-4 flex-shrink-0 flex items-center justify-center text-slate-400 hover:text-sky-300 transition-colors focus:outline-none"
                   >
                     <i
                       data-lucide="chevron-right"
@@ -494,56 +504,58 @@
                     ></i>
                   </button>
                 ) : (
-                  <span class="w-4"></span>
+                  <span class="w-4 flex-shrink-0"></span>
                 )}
 
-                {/* Key Name */}
-                {row.keyName !== null && (
-                  <span class="text-moonlight-key font-semibold">
-                    "{highlightText(row.keyName, true)}":
-                  </span>
-                )}
+                <div class="min-w-max flex-1 flex flex-nowrap items-center gap-1.5 tree-row-text">
+                  {/* Key Name */}
+                  {row.keyName !== null && (
+                    <span class="text-moonlight-key font-semibold">
+                      "{highlightText(row.keyName, true)}":
+                    </span>
+                  )}
 
-                {/* Expandable Headers */}
-                {row.type === "object" && (
-                  <span class="text-moonlight-bracket font-semibold">
-                    {"{"}
-                    {row.isCollapsed && (
-                      <span
-                        onClick={() => onToggle(row.path)}
-                        class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
-                      >
-                        ... {row.childCount}{" "}
-                        {row.childCount === 1 ? "item" : "items"} ...
-                      </span>
-                    )}
-                    {row.isCollapsed && "}"}
-                    {row.isCollapsed && !row.isLast && ","}
-                  </span>
-                )}
+                  {/* Expandable Headers */}
+                  {row.type === "object" && (
+                    <span class="text-moonlight-bracket font-semibold">
+                      {"{"}
+                      {row.isCollapsed && (
+                        <span
+                          onClick={() => onToggle(row.path)}
+                          class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
+                        >
+                          ... {row.childCount}{" "}
+                          {row.childCount === 1 ? "item" : "items"} ...
+                        </span>
+                      )}
+                      {row.isCollapsed && "}"}
+                      {row.isCollapsed && !row.isLast && ","}
+                    </span>
+                  )}
 
-                {row.type === "array" && (
-                  <span class="text-moonlight-bracket font-semibold">
-                    {"["}
-                    {row.isCollapsed && (
-                      <span
-                        onClick={() => onToggle(row.path)}
-                        class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
-                      >
-                        ... {row.childCount}{" "}
-                        {row.childCount === 1 ? "item" : "items"} ...
-                      </span>
-                    )}
-                    {row.isCollapsed && "]"}
-                    {row.isCollapsed && !row.isLast && ","}
-                  </span>
-                )}
+                  {row.type === "array" && (
+                    <span class="text-moonlight-bracket font-semibold">
+                      {"["}
+                      {row.isCollapsed && (
+                        <span
+                          onClick={() => onToggle(row.path)}
+                          class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
+                        >
+                          ... {row.childCount}{" "}
+                          {row.childCount === 1 ? "item" : "items"} ...
+                        </span>
+                      )}
+                      {row.isCollapsed && "]"}
+                      {row.isCollapsed && !row.isLast && ","}
+                    </span>
+                  )}
 
-                {/* Primitive Value */}
-                {!row.isExpandable && renderValue()}
-                {!row.isExpandable && !row.isLast && (
-                  <span class="text-moonlight-bracket">,</span>
-                )}
+                  {/* Primitive Value */}
+                  {!row.isExpandable && renderValue()}
+                  {!row.isExpandable && !row.isLast && (
+                    <span class="text-moonlight-bracket">,</span>
+                  )}
+                </div>
               </div>
 
               {/* Embedded Sub-Tree */}
@@ -727,6 +739,7 @@
               <div
                 style={{
                   height: `${totalHeight}px`,
+                  minWidth: "max-content",
                   width: "100%",
                   position: "relative",
                 }}
