@@ -559,7 +559,7 @@
                 collapsedPaths,
                 childPath,
                 depth + 1,
-                k,
+                type === "array" ? null : k,
                 childIsLast,
               );
               rows.push(...childRows);
