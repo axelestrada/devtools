@@ -1477,9 +1477,49 @@
         );
       }
 
+      function getRouteFromPath(pathname) {
+        return pathname === "/log-json-studio" ? "json-studio" : "home";
+      }
+
+      function getRouteFromLocation(location = window.location) {
+        const hashRoute = (location.hash || "").replace(/^#/, "").trim();
+        if (hashRoute === "/log-json-studio" || hashRoute === "log-json-studio") {
+          return "json-studio";
+        }
+
+        return getRouteFromPath(location.pathname);
+      }
+
+      function getPathForRoute(route) {
+        return route === "json-studio" ? "/#log-json-studio" : "/";
+      }
+
       // --- MAIN DASHBOARD APP (JTeller Tools) ---
       function JTellerToolsApp() {
-        const [currentApp, setCurrentApp] = useState("home"); // 'home' or 'json-studio'
+        const [currentRoute, setCurrentRoute] = useState(() =>
+          getRouteFromLocation(window.location),
+        );
+
+        const navigateToRoute = useCallback((route) => {
+          const nextPath = getPathForRoute(route);
+          if (window.location.pathname + window.location.hash !== nextPath) {
+            window.history.pushState({}, "", nextPath);
+          }
+          setCurrentRoute(route);
+        }, []);
+
+        useEffect(() => {
+          const handlePopState = () => {
+            setCurrentRoute(getRouteFromLocation(window.location));
+          };
+
+          window.addEventListener("popstate", handlePopState);
+          window.addEventListener("hashchange", handlePopState);
+          return () => {
+            window.removeEventListener("popstate", handlePopState);
+            window.removeEventListener("hashchange", handlePopState);
+          };
+        }, []);
 
         // Refresh lucide icons
         useEffect(() => {
@@ -1488,8 +1528,8 @@
           }
         });
 
-        if (currentApp === "json-studio") {
-          return <LogJsonStudio onBackToHome={() => setCurrentApp("home")} />;
+        if (currentRoute === "json-studio") {
+          return <LogJsonStudio onBackToHome={() => navigateToRoute("home")} />;
         }
 
         return (
@@ -1502,7 +1542,7 @@
                   {/* TOOL 1: Log JSON Studio */}
                   <div
                     class="group bg-white hover:border-[#F09770] border border-gray-200 rounded-2xl p-6 transition-all duration-300 flex flex-col justify-between h-40 relative overflow-hidden cursor-pointer"
-                    onClick={() => setCurrentApp("json-studio")}
+                    onClick={() => navigateToRoute("json-studio")}
                   >
                     {" "}
                     <div class="flex items-center justify-between mb-2">
