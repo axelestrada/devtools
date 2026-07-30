@@ -240,15 +240,13 @@
         return null;
       }
 
-      function parseJavaLikeLogToJson(text) {
+      function parseJavaLikeLogToJson(text, startPos = 0) {
         if (!text || typeof text !== "string") return null;
 
-        const source = text.trim();
-        if (!source) return null;
-
+        const source = text;
         const state = {
           text: source,
-          pos: 0,
+          pos: startPos,
 
           skipWhitespace() {
             while (this.pos < this.text.length && /\s/.test(this.text[this.pos])) {
@@ -467,29 +465,80 @@
 
         const parsed = state.parseValue();
         state.skipWhitespace();
-        return parsed;
+        return { value: parsed, endPos: state.pos };
+      }
+
+      function getLineNumberFromPos(text, pos) {
+        return text.substring(0, pos).split("\n").length;
+      }
+
+      function attachLineMeta(value, line) {
+        if (value && typeof value === "object") {
+          Object.defineProperty(value, "__line", {
+            value: line,
+            enumerable: false,
+            configurable: true,
+          });
+        }
+        return value;
       }
 
       function parseLogText(text) {
         if (!text || typeof text !== "string") return null;
 
-        const trimmed = text.trim();
-        if (!trimmed) return null;
+        let pos = 0;
+        const results = [];
 
-        const extractedJson = extractFirstJson(trimmed);
-        if (extractedJson) {
-          try {
-            return JSON.parse(extractedJson);
-          } catch (e) {
-            // fall through to Java-like parsing
+        while (pos < text.length) {
+          while (pos < text.length && /\s/.test(text[pos])) {
+            pos++;
           }
+
+          if (pos >= text.length) break;
+
+          const currentChar = text[pos];
+          if (currentChar !== "{" && currentChar !== "[") {
+            pos++;
+            continue;
+          }
+
+          const lineNumber = getLineNumberFromPos(text, pos);
+          const remaining = text.slice(pos);
+          const extractedJson = extractFirstJson(remaining);
+
+          if (extractedJson) {
+            try {
+              const parsed = attachLineMeta(JSON.parse(extractedJson), lineNumber);
+              results.push(parsed);
+              pos += extractedJson.length;
+              continue;
+            } catch (e) {
+              // fall through to Java-like parsing
+            }
+          }
+
+          try {
+            const parsed = parseJavaLikeLogToJson(remaining, 0);
+            if (parsed && typeof parsed.endPos === "number" && parsed.endPos > 0) {
+              results.push(attachLineMeta(parsed.value, lineNumber));
+              pos += parsed.endPos;
+              continue;
+            }
+          } catch (e) {
+            // continue scanning for next JSON
+          }
+
+          pos++;
         }
 
-        try {
-          return parseJavaLikeLogToJson(trimmed);
-        } catch (e) {
-          return null;
-        }
+        if (results.length === 0) return null;
+        if (results.length === 1) return results[0];
+        Object.defineProperty(results, "__multipleRoots", {
+          value: true,
+          enumerable: false,
+          configurable: true,
+        });
+        return results;
       }
 
       function parseErrorPosition(errorMsg, text) {
@@ -544,13 +593,40 @@
         depth = 0,
         keyName = null,
         isLast = true,
+        parentLine = null,
       ) {
         const rows = [];
-        const type = Array.isArray(data)
-          ? "array"
-          : data === null
-            ? "null"
-            : typeof data;
+        const line =
+          data && typeof data === "object" && data.__line
+            ? data.__line
+            : parentLine;
+        const isMultiRoot = Array.isArray(data) && data.__multipleRoots;
+        const type = isMultiRoot
+          ? "multiRoot"
+          : Array.isArray(data)
+            ? "array"
+            : data === null
+              ? "null"
+              : typeof data;
+
+        if (type === "multiRoot") {
+          const keys = Object.keys(data);
+          keys.forEach((k, idx) => {
+            const childIsLast = idx === keys.length - 1;
+            const childPath = path ? `${path}.${k}` : k;
+            const childRows = flattenTree(
+              data[k],
+              collapsedPaths,
+              childPath,
+              depth,
+              null,
+              childIsLast,
+              line,
+            );
+            rows.push(...childRows);
+          });
+          return rows;
+        }
 
         if (type === "object" || type === "array") {
           const isCollapsed = collapsedPaths.has(path);
@@ -566,6 +642,7 @@
             isCollapsed,
             childCount,
             isLast,
+            line,
           });
 
           if (!isCollapsed && childCount > 0) {
@@ -579,6 +656,7 @@
                 depth + 1,
                 type === "array" ? null : k,
                 childIsLast,
+                line,
               );
               rows.push(...childRows);
             });
@@ -589,6 +667,7 @@
               type: type === "array" ? "array_end" : "object_end",
               isExpandable: false,
               isLast,
+              line,
             });
           }
         } else {
@@ -600,10 +679,15 @@
             value: data,
             isExpandable: false,
             isLast,
+            line: parentLine,
           });
         }
 
         return rows;
+      }
+
+      function getRowKey(row) {
+        return `${row.path}|${row.type}`;
       }
 
       // --- COMPONENT: TREE ROW ---
@@ -671,7 +755,7 @@
 
               return (
                 <span class="inline-flex items-center gap-1.5 flex-nowrap whitespace-nowrap">
-                  <span class="text-moonlight-string font-regular whitespace-nowrap">
+                  <span class="text-moonlight-string font-medium whitespace-nowrap">
                     "{highlightText(val)}"
                   </span>
 
@@ -710,7 +794,7 @@
                   {embeddedParsed && (
                     <button
                       onClick={() => setShowEmbedded(!showEmbedded)}
-                      class="tree-row-control text-[10px] bg-moonlight-embedded/20 text-moonlight-embedded border border-moonlight-embedded/40 px-2 py-0.5 rounded-full hover:bg-moonlight-embedded/30 transition-all font-regular active:scale-95"
+                      class="tree-row-control text-[10px] bg-moonlight-embedded/20 text-moonlight-embedded border border-moonlight-embedded/40 px-2 py-0.5 rounded-full hover:bg-moonlight-embedded/30 transition-all font-medium active:scale-95"
                     >
                       {showEmbedded
                         ? "Hide Inner JSON"
@@ -723,7 +807,7 @@
 
             if (row.type === "number") {
               return (
-                <span class="text-moonlight-number font-regular">
+                <span class="text-moonlight-number font-medium">
                   {highlightText(row.value)}
                 </span>
               );
@@ -731,7 +815,7 @@
 
             if (row.type === "boolean") {
               return (
-                <span class="text-moonlight-boolean font-regular">
+                <span class="text-moonlight-boolean font-medium">
                   {highlightText(String(row.value))}
                 </span>
               );
@@ -739,7 +823,7 @@
 
             if (row.type === "null") {
               return (
-                <span class="text-moonlight-null italic font-regular">
+                <span class="text-moonlight-null italic font-medium">
                   {highlightText("null")}
                 </span>
               );
@@ -750,104 +834,119 @@
 
           if (row.type === "object_end") {
             return (
-              <div
-                style={indentStyle}
-                class="py-0.5 text-moonlight-bracket font-regular fira-code"
-              >
-                {"}"}
-                {!row.isLast && ","}
+              <div class="flex items-start gap-2">
+                <div class="flex-shrink-0 w-10 text-right text-[11px] text-slate-500 font-medium select-none">
+                  {row.line || ""}
+                </div>
+                <div
+                  style={indentStyle}
+                  class="py-0.5 text-moonlight-bracket font-medium fira-code"
+                >
+                  {"}"}
+                  {!row.isLast && ","}
+                </div>
               </div>
             );
           }
 
           if (row.type === "array_end") {
             return (
-              <div
-                style={indentStyle}
-                class="py-0.5 text-moonlight-bracket font-regular fira-code"
-              >
-                {"]"}
-                {!row.isLast && ","}
+              <div class="flex items-start gap-2">
+                <div class="flex-shrink-0 w-10 text-right text-[11px] text-slate-500 font-medium select-none bg-moonlight-bg px-1.5 py-0.5 rounded-md border border-slate-800/20">
+                  {row.line || ""}
+                </div>
+                <div
+                  style={indentStyle}
+                  class="py-0.5 text-moonlight-bracket font-medium fira-code"
+                >
+                  {"]"}
+                  {!row.isLast && ","}
+                </div>
               </div>
             );
           }
 
           return (
             <div class="flex flex-col">
-              <div
-                style={indentStyle}
-                class="group py-1 hover:bg-moonlight-active/60 rounded-lg transition-colors flex items-start gap-1.5 fira-code text-xs leading-relaxed text-slate-200 min-w-0 tree-row-content whitespace-nowrap"
-              >
-                {/* Toggle Arrow */}
-                {row.isExpandable ? (
-                  <button
-                    onClick={() => onToggle(row.path)}
-                    class="w-4 h-4 flex-shrink-0 flex items-center justify-center text-slate-400 hover:text-sky-300 transition-colors focus:outline-none"
+              <div class="flex items-start gap-2">
+                <div class="flex-shrink-0 w-10 text-right text-[11px] text-slate-500 font-medium select-none">
+                  {row.line || ""}
+                </div>
+
+                <div class="flex items-start gap-1 min-w-0">
+                  {row.isExpandable ? (
+                    <button
+                      onClick={() => onToggle(row.path)}
+                      class="w-4 h-4 flex-shrink-0 flex items-center justify-center text-slate-400 hover:text-sky-300 transition-colors focus:outline-none"
+                    >
+                      <i
+                        data-lucide="chevron-right"
+                        class={`w-3.5 h-3.5 transform transition-transform ${!row.isCollapsed ? "rotate-90" : "rotate-0"}`}
+                      ></i>
+                    </button>
+                  ) : (
+                    <span class="w-4 flex-shrink-0"></span>
+                  )}
+
+                  <div
+                    style={indentStyle}
+                    class="min-w-max flex-1 flex flex-nowrap items-center gap-1.5 tree-row-text"
                   >
-                    <i
-                      data-lucide="chevron-right"
-                      class={`w-3.5 h-3.5 transform transition-transform ${!row.isCollapsed ? "rotate-90" : "rotate-0"}`}
-                    ></i>
-                  </button>
-                ) : (
-                  <span class="w-4 flex-shrink-0"></span>
-                )}
+                    {/* Key Name */}
+                    {row.keyName !== null && (
+                      <span class="text-moonlight-key font-medium">
+                        "{highlightText(row.keyName, true)}":
+                      </span>
+                    )}
 
-                <div class="min-w-max flex-1 flex flex-nowrap items-center gap-1.5 tree-row-text">
-                  {/* Key Name */}
-                  {row.keyName !== null && (
-                    <span class="text-moonlight-key font-regular">
-                      "{highlightText(row.keyName, true)}":
-                    </span>
-                  )}
+                    {/* Expandable Headers */}
+                    {row.type === "object" && (
+                      <span class="text-moonlight-bracket font-medium">
+                        {"{"}
+                        {row.isCollapsed && (
+                          <span
+                            onClick={() => onToggle(row.path)}
+                            class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
+                          >
+                            ... {row.childCount}{" "}
+                            {row.childCount === 1 ? "item" : "items"} ...
+                          </span>
+                        )}
+                        {row.isCollapsed && "}"}
+                        {row.isCollapsed && !row.isLast && ","}
+                      </span>
+                    )}
 
-                  {/* Expandable Headers */}
-                  {row.type === "object" && (
-                    <span class="text-moonlight-bracket font-regular">
-                      {"{"}
-                      {row.isCollapsed && (
-                        <span
-                          onClick={() => onToggle(row.path)}
-                          class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
-                        >
-                          ... {row.childCount}{" "}
-                          {row.childCount === 1 ? "item" : "items"} ...
-                        </span>
-                      )}
-                      {row.isCollapsed && "}"}
-                      {row.isCollapsed && !row.isLast && ","}
-                    </span>
-                  )}
+                    {row.type === "array" && (
+                      <span class="text-moonlight-bracket font-medium">
+                        {"["}
+                        {row.isCollapsed && (
+                          <span
+                            onClick={() => onToggle(row.path)}
+                            class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
+                          >
+                            ... {row.childCount}{" "}
+                            {row.childCount === 1 ? "item" : "items"} ...
+                          </span>
+                        )}
+                        {row.isCollapsed && "]"}
+                        {row.isCollapsed && !row.isLast && ","}
+                      </span>
+                    )}
 
-                  {row.type === "array" && (
-                    <span class="text-moonlight-bracket font-regular">
-                      {"["}
-                      {row.isCollapsed && (
-                        <span
-                          onClick={() => onToggle(row.path)}
-                          class="text-slate-400 text-[11px] font-normal mx-1 cursor-pointer hover:text-sky-300 hover:underline bg-slate-800/80 px-1.5 py-0.5 rounded-md"
-                        >
-                          ... {row.childCount}{" "}
-                          {row.childCount === 1 ? "item" : "items"} ...
-                        </span>
-                      )}
-                      {row.isCollapsed && "]"}
-                      {row.isCollapsed && !row.isLast && ","}
-                    </span>
-                  )}
-
-                  {/* Primitive Value */}
-                  {!row.isExpandable && renderValue()}
-                  {!row.isExpandable && !row.isLast && (
-                    <span class="text-moonlight-bracket font-regular">,</span>
-                  )}
+                    {/* Primitive Value */}
+                    {!row.isExpandable && renderValue()}
+                    {!row.isExpandable && !row.isLast && (
+                      <span class="text-moonlight-bracket font-medium">,</span>
+                    )}
+                  </div>
                 </div>
               </div>
 
               {/* Embedded Sub-Tree */}
               {showEmbedded && embeddedParsed && (
                 <div class="ml-8 my-2 p-3 bg-slate-900/90 border border-moonlight-embedded/30 rounded-xl shadow-lg">
-                  <div class="text-[11px] text-moonlight-embedded font-regular mb-1.5 flex items-center gap-1.5">
+                  <div class="text-[11px] text-moonlight-embedded font-medium mb-1.5 flex items-center gap-1.5">
                     <i data-lucide="layers" class="w-3.5 h-3.5"></i>
                     Nested Parsed Object:
                   </div>
@@ -862,9 +961,19 @@
       // Helper for rendering embedded JSON inside strings
       function NestedViewer({ data, onCopyText }) {
         const [collapsedPaths, setCollapsedPaths] = useState(new Set());
+        const expandedRows = useMemo(() => flattenTree(data, new Set()), [data]);
+        const lineMap = useMemo(() => {
+          const map = new Map();
+          expandedRows.forEach((row, index) => map.set(getRowKey(row), index + 1));
+          return map;
+        }, [expandedRows]);
+
         const rows = useMemo(
-          () => flattenTree(data, collapsedPaths),
-          [data, collapsedPaths],
+          () => flattenTree(data, collapsedPaths).map((row) => ({
+            ...row,
+            line: lineMap.get(getRowKey(row)) ?? row.line,
+          })),
+          [data, collapsedPaths, lineMap],
         );
 
         const handleToggle = (path) => {
@@ -878,9 +987,9 @@
 
         return (
           <div class="flex flex-col">
-            {rows.map((row, idx) => (
+            {rows.map((row) => (
               <TreeRow
-                key={idx}
+                key={getRowKey(row)}
                 row={row}
                 onToggle={handleToggle}
                 searchQuery=""
@@ -902,10 +1011,20 @@
         const [collapsedPaths, setCollapsedPaths] = useState(new Set());
         const containerRef = useRef(null);
 
+        const expandedRows = useMemo(() => flattenTree(data, new Set()), [data]);
+        const lineMap = useMemo(() => {
+          const map = new Map();
+          expandedRows.forEach((row, index) => map.set(getRowKey(row), index + 1));
+          return map;
+        }, [expandedRows]);
+
         // Flatten tree based on collapse state
         const rows = useMemo(() => {
-          return flattenTree(data, collapsedPaths);
-        }, [data, collapsedPaths]);
+          return flattenTree(data, collapsedPaths).map((row) => ({
+            ...row,
+            line: lineMap.get(getRowKey(row)) ?? row.line,
+          }));
+        }, [data, collapsedPaths, lineMap]);
 
         // Handle collapse / expand
         const handleToggle = useCallback((path) => {
@@ -1078,7 +1197,7 @@
               >
                 {visibleRows.map(({ row, index }) => (
                   <div
-                    key={row.path || index}
+                    key={getRowKey(row) || index}
                     style={{
                       position: "absolute",
                       top: `${index * ROW_HEIGHT}px`,
@@ -1094,7 +1213,7 @@
                       activeMatchIndex={activeMatchIndex}
                       currentMatchIndex={currentMatchIndex}
                       onCopyText={onCopyText}
-                      isActiveMatch={row.index === activeMatchRowIndex}
+                      isActiveMatch={index === activeMatchRowIndex}
                     />
                   </div>
                 ))}
